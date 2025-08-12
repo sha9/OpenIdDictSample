@@ -1,0 +1,20 @@
+﻿@{
+    ViewData["Title"] = "Login";
+    var returnUrl = ViewData["ReturnUrl"] as string;
+}
+
+<h2>Login</h2>
+
+<form method="post" asp-controller="Account" asp-action="Login">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="returnUrl" value="@returnUrl" />
+    <div>
+        <label>Email:</label>
+        <input type="email" name="email" required />
+    </div>
+    <div>
+        <label>Password:</label>
+        <input type="password" name="password" required />
+    </div>
+    <button type="submit">Login</button>
+</form>
