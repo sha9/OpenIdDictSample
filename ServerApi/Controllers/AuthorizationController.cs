@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -10,6 +11,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace ServerApi.Controllers
 {
+    [AllowAnonymous]
     public class AuthorizationController : Controller
     {
         private readonly UserManager<ApplicationUser> _userManager;
@@ -28,7 +30,7 @@ namespace ServerApi.Controllers
             var request = HttpContext.GetOpenIddictServerRequest()
         ?? throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
 
-            // ✅ 1. If user is not signed in, redirect to login page
+            // 1. If user is not signed in, redirect to login page
             if (!User.Identity?.IsAuthenticated ?? true)
             {
                 var fullAuthorizeUrl = (Request.Path + Request.QueryString).ToString();
@@ -37,16 +39,16 @@ namespace ServerApi.Controllers
                 authenticationSchemes: IdentityConstants.ApplicationScheme,
                 properties: new AuthenticationProperties
                 {
-                    RedirectUri = fullAuthorizeUrl // 👈 preserve full /connect/authorize?... 
+                    RedirectUri = fullAuthorizeUrl // preserve full /connect/authorize?... 
                 });
             }
 
-            // ✅ 2. Get user info
+            // 2. Get user info
             var user = await _userManager.GetUserAsync(User);
             if (user is null)
                 return Forbid(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 
-            // ✅ 3. Build claims
+            // 3. Build claims
             var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType);
 
             // sub
@@ -87,11 +89,11 @@ namespace ServerApi.Controllers
                 identity.AddClaim(claim);
             }
 
-            // ✅ 4. Build principal
+            // 4. Build principal
             var principal = new ClaimsPrincipal(identity);
             principal.SetPresenters(request.ClientId!);
 
-            // ✅ 5. Set scopes
+            // 5. Set scopes
             var allowed = new[]
             {
                 Scopes.OpenId, Scopes.Profile, Scopes.Email, Scopes.Roles, Scopes.OfflineAccess
@@ -99,7 +101,7 @@ namespace ServerApi.Controllers
             principal.SetScopes(allowed.Intersect(request.GetScopes()));
             principal.SetResources("resource_server");
 
-            // ✅ 6. Return sign-in to complete the authorization code issuance
+            // 6. Return sign-in to complete the authorization code issuance
             return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
         [HttpPost("~/connect/token")]
@@ -183,6 +185,7 @@ namespace ServerApi.Controllers
                 ErrorDescription = "The specified grant type is not supported."
             });
         }
+        [Authorize]
         [HttpGet("~/connect/logout")]
         public async Task<IActionResult> Logout()
         {

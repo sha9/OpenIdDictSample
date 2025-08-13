@@ -1,11 +1,11 @@
 ﻿@model ServerApi.RegisterViewModel
 @{
-    var returnUrl = (string?)ViewData["ReturnUrl"] ?? "/connect/authorize";
+    var returnUrl = ViewData["ReturnUrl"] as string;
 }
 
 <h2>Create your account</h2>
 
-<form asp-action="Register" asp-controller="Account" method="post">
+<form asp-action="Register" asp-controller="Authentication" method="post">
     @Html.AntiForgeryToken()
     <input type="hidden" name="returnUrl" value="@returnUrl" />
     <div>
@@ -28,19 +28,19 @@
 
 <p>
     Already have an account?
-    <a asp-action="Login" asp-route-returnUrl="@returnUrl">Sign in</a>
+    <a asp-action="Login" asp-controller="Authentication" asp-route-returnUrl="@returnUrl">Sign in</a>
 </p>
 
 <hr />
 
-<form action="/Account/External/Google" method="get">
+<form action="/Authentication/External/Google" method="get">
     @Html.AntiForgeryToken()
     <input type="hidden" name="provider" value="Google" />
     <input type="hidden" name="returnUrl" value="@returnUrl" />
     <button type="submit">Continue with Google</button>
 </form>
 
-<form action="/Account/External/LinkedIn" method="get">
+<form action="/Authentication/External/LinkedIn" method="get">
     @Html.AntiForgeryToken()
     <input type="hidden" name="provider" value="LinkedIn" />
     <input type="hidden" name="returnUrl" value="@returnUrl" />

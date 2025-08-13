@@ -2,30 +2,29 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using OpenIddict.Client.AspNetCore;
 using OpenIddict.Client.WebIntegration;
 using System.Security.Claims;
 
 namespace ServerApi.Controllers
 {
-    public class AccountController : Controller
+    [AllowAnonymous]
+    public class AuthenticationController : Controller
     {
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly UserManager<ApplicationUser> _userManager;
 
-        public AccountController(SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager)
+        public AuthenticationController(SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager)
         {
             _signInManager = signInManager;
             _userManager = userManager;
         }
 
         [HttpGet]
-        [AllowAnonymous]
         public async Task<IActionResult> Login(string returnUrl)
         {
             await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
 
-            if(string.IsNullOrWhiteSpace(returnUrl) || !Url.IsLocalUrl(returnUrl))
+            if (string.IsNullOrWhiteSpace(returnUrl) || !Url.IsLocalUrl(returnUrl))
                 return View("AuthError", new AuthErrorVm
                 {
                     Title = "Session expired",
@@ -38,7 +37,6 @@ namespace ServerApi.Controllers
         }
 
         [HttpPost]
-        [AllowAnonymous]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Login(string email, string password, string returnUrl = "/")
         {
@@ -71,7 +69,6 @@ namespace ServerApi.Controllers
         }
         // ---------- Register ----------
         [HttpGet]
-        [AllowAnonymous]
         public IActionResult Register(string returnUrl)
         {
             if (string.IsNullOrWhiteSpace(returnUrl) || !Url.IsLocalUrl(returnUrl))
@@ -87,7 +84,6 @@ namespace ServerApi.Controllers
         }
 
         [HttpPost, ValidateAntiForgeryToken]
-        [AllowAnonymous]
         public async Task<IActionResult> Register(RegisterViewModel model, string returnUrl)
         {
             if (!ModelState.IsValid)
@@ -135,8 +131,7 @@ namespace ServerApi.Controllers
 
         // ---------- External (works from Login or Register) ----------
 
-        [HttpGet("account/external/{provider}")]
-        [AllowAnonymous]
+        [HttpGet("authentication/external/{provider}")]
         public IActionResult External(string provider, string? returnUrl = null)
         {
             if (string.IsNullOrWhiteSpace(returnUrl) || !Url.IsLocalUrl(returnUrl))
@@ -160,7 +155,6 @@ namespace ServerApi.Controllers
 
 
         [HttpGet("~/callback/login/{provider}"), HttpPost("~/callback/login/{provider}")]
-        [AllowAnonymous]
         [IgnoreAntiforgeryToken]
         public async Task<IActionResult> ExternalLoginCallback(string provider)
         {
@@ -169,7 +163,7 @@ namespace ServerApi.Controllers
                 OpenIddict.Client.AspNetCore.OpenIddictClientAspNetCoreDefaults.AuthenticationScheme);
 
             if (result.Principal is not { Identity.IsAuthenticated: true })
-                return LocalRedirect("/Account/Login"); // or show an error page
+                return LocalRedirect("/Authentication/Login"); // or show an error page
 
             // 2) Extract email (or fallback to a prompt page)
             var email =
@@ -229,6 +223,5 @@ namespace ServerApi.Controllers
 
             return LocalRedirect(returnUrl);
         }
-
     }
 }
