@@ -31,9 +31,14 @@ namespace ServerApi.Controllers
             // ✅ 1. If user is not signed in, redirect to login page
             if (!User.Identity?.IsAuthenticated ?? true)
             {
-                // 👇 This triggers the Identity login UI (e.g. /Account/Login?ReturnUrl=/connect/authorize)
+                var fullAuthorizeUrl = (Request.Path + Request.QueryString).ToString();
+
                 return Challenge(
-                    authenticationSchemes: IdentityConstants.ApplicationScheme);
+                authenticationSchemes: IdentityConstants.ApplicationScheme,
+                properties: new AuthenticationProperties
+                {
+                    RedirectUri = fullAuthorizeUrl // 👈 preserve full /connect/authorize?... 
+                });
             }
 
             // ✅ 2. Get user info
@@ -42,39 +47,56 @@ namespace ServerApi.Controllers
                 return Forbid(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 
             // ✅ 3. Build claims
-            //var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType);
-            //identity.AddClaim(new Claim(OpenIddictConstants.Claims.Subject, user.Id.ToString()));
-            //identity.AddClaim(new Claim(OpenIddictConstants.Claims.Email, user.Email ?? ""));
-
-            //var roles = await _userManager.GetRolesAsync(user);
-            //foreach (var role in roles)
-            //{
-            //    identity.AddClaim(new Claim(OpenIddictConstants.Claims.Role, role));
-            //}
             var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType);
+
+            // sub
             identity.AddClaim(new Claim(Claims.Subject, user.Id.ToString())
                 .SetDestinations(Destinations.AccessToken, Destinations.IdentityToken));
 
+            // email
             if (!string.IsNullOrEmpty(user.Email))
             {
-                identity.AddClaim(new Claim(Claims.Email, user.Email)
-                    .SetDestinations(Destinations.AccessToken, Scopes.Email));
+                var emailClaim = new Claim(Claims.Email, user.Email);
+                var emailDest = new List<string> { Destinations.AccessToken };
+                if (request.HasScope(Scopes.Email))
+                    emailDest.Add(Destinations.IdentityToken);
+                emailClaim.SetDestinations(emailDest);
+                identity.AddClaim(emailClaim);
             }
 
+            // (optional) name
+            if (!string.IsNullOrEmpty(user.UserName))
+            {
+                var nameClaim = new Claim(Claims.Name, user.UserName);
+                var nameDest = new List<string> { Destinations.AccessToken };
+                if (request.HasScope(Scopes.Profile))
+                    nameDest.Add(Destinations.IdentityToken);
+                nameClaim.SetDestinations(nameDest);
+                identity.AddClaim(nameClaim);
+            }
+
+            // roles
             var roles = await _userManager.GetRolesAsync(user);
             foreach (var role in roles)
             {
                 var claim = new Claim(Claims.Role, role);
-                var destinations = new List<string> { Destinations.AccessToken, Destinations.IdentityToken };
-                claim.SetDestinations(destinations);
+                var roleDest = new List<string> { Destinations.AccessToken };
+                if (request.HasScope(Scopes.Roles))
+                    roleDest.Add(Destinations.IdentityToken);
+                claim.SetDestinations(roleDest);
                 identity.AddClaim(claim);
             }
 
             // ✅ 4. Build principal
             var principal = new ClaimsPrincipal(identity);
+            principal.SetPresenters(request.ClientId!);
 
             // ✅ 5. Set scopes
-            principal.SetScopes(request.GetScopes());
+            var allowed = new[]
+            {
+                Scopes.OpenId, Scopes.Profile, Scopes.Email, Scopes.Roles, Scopes.OfflineAccess
+            };
+            principal.SetScopes(allowed.Intersect(request.GetScopes()));
             principal.SetResources("resource_server");
 
             // ✅ 6. Return sign-in to complete the authorization code issuance
@@ -103,12 +125,56 @@ namespace ServerApi.Controllers
             if (request.IsRefreshTokenGrantType())
             {
                 var result = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-                if (result is null || result.Principal is null)
+                var principal = result?.Principal ?? new ClaimsPrincipal();
+
+                // Optional hardening: ensure user still valid
+                var userId = principal.GetClaim(Claims.Subject);
+                var user = string.IsNullOrEmpty(userId) ? null : await _userManager.FindByIdAsync(userId);
+                if (user is null || !await _signInManager.CanSignInAsync(user))
                     return Forbid(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 
-                // (Optional) you could re-apply scopes/resources/claims here if needed.
+                // Rebuild a fresh identity (same pattern as in Authorize())
+                var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType);
+                identity.AddClaim(new Claim(Claims.Subject, user.Id.ToString())
+                    .SetDestinations(Destinations.AccessToken, Destinations.IdentityToken));
 
-                return SignIn(result.Principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+                if (!string.IsNullOrEmpty(user.Email))
+                {
+                    var emailClaim = new Claim(Claims.Email, user.Email);
+                    var emailDest = new List<string> { Destinations.AccessToken };
+                    if (principal.HasScope(Scopes.Email))
+                        emailDest.Add(Destinations.IdentityToken);
+                    emailClaim.SetDestinations(emailDest);
+                    identity.AddClaim(emailClaim);
+                }
+
+                if (!string.IsNullOrEmpty(user.UserName))
+                {
+                    var nameClaim = new Claim(Claims.Name, user.UserName);
+                    var nameDest = new List<string> { Destinations.AccessToken };
+                    if (principal.HasScope(Scopes.Profile))
+                        nameDest.Add(Destinations.IdentityToken);
+                    nameClaim.SetDestinations(nameDest);
+                    identity.AddClaim(nameClaim);
+                }
+
+                var roles = await _userManager.GetRolesAsync(user);
+                foreach (var role in roles)
+                {
+                    var rc = new Claim(Claims.Role, role);
+                    var dest = new List<string> { Destinations.AccessToken };
+                    if (principal.HasScope(Scopes.Roles))
+                        dest.Add(Destinations.IdentityToken);
+                    rc.SetDestinations(dest);
+                    identity.AddClaim(rc);
+                }
+
+                var refreshed = new ClaimsPrincipal(identity);
+                refreshed.SetScopes(principal.GetScopes());
+                refreshed.SetResources("resource_server");
+                refreshed.SetPresenters(principal.GetPresenters()); // keep client binding
+
+                return SignIn(refreshed, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
             }
 
             return BadRequest(new OpenIddictResponse
@@ -120,12 +186,11 @@ namespace ServerApi.Controllers
         [HttpGet("~/connect/logout")]
         public async Task<IActionResult> Logout()
         {
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);   // optional
             await HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
 
-            return SignOut(new AuthenticationProperties
-            {
-                RedirectUri = "/" // this can be the home page or client callback URL
-            }, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+            return SignOut(new AuthenticationProperties { RedirectUri = "/" },
+                OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
     }
 }
